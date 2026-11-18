@@ -16,7 +16,8 @@ local State = require(script:WaitForChild("State"))
 
 -- Eight bases, eight players: a ninth joiner would otherwise be handed a
 -- base someone already owns, so the server is capped at the base count.
-Players.MaxPlayers = Cast.MAX_PLAYERS
+-- (MaxPlayers is set in Studio's Game Settings, not here: it is read-only
+-- at runtime, and assigning it aborts this script before the world builds.)
 
 local world = World.buildWorld()
 
