@@ -403,6 +403,17 @@ actionEvent.OnServerEvent:Connect(function(player, action)
 	end
 	if action == "Lock" then
 		local ok, message = State.lockBase(player)
+		if ok then
+			-- A visible padlock on the base, so thieves reroute instead of
+			-- wasting a steal attempt on a locked base.
+			local base = world.bases[data.baseIndex]
+			base.ownerLabel.Text = "LOCKED - " .. string.upper(player.Name) .. "'s BASE"
+			task.delay(Cast.LOCK_SECONDS, function()
+				if State.getPlayer(player) and world.bases[data.baseIndex] then
+					world.bases[data.baseIndex].ownerLabel.Text = string.upper(player.Name) .. "'s BASE"
+				end
+			end)
+		end
 		announce(player.Name .. ": " .. message)
 	elseif action == "Slap" then
 		slapPlayer(player)
