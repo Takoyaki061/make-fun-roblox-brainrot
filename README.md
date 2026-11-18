@@ -12,8 +12,9 @@ the Grinder Pit sweeper all try to take what you caught.
 3. Money ticks up every second, server-side. Spend it on rarer brainrots, Golden Conveyor upgrades (+25% income
    per level, the money sink) or a **Rebirth** ($25,000 × rebirth count, +50% income forever, resets money and base).
 4. Defend: hold **E** on another player's base brainrot to steal it (5 s hold). Owners press **F** to slap thieves
-   away, or **L** to lock their base for 20 s (60 s cooldown). Alone in the server, the Sneaky Snatcher raids a
-   random base every 75 s, and the Grinder Pit's spinning sweeper knocks wanderers back to spawn.
+   away — a slapped thief cannot steal again for 10 s — or **L** to lock their base for 20 s (60 s cooldown).
+   Alone in the server, the Sneaky Snatcher raids a random base every 60 s, and the Grinder Pit's spinning sweeper
+   knocks wanderers back to spawn. **U** buys an upgrade and **R** rebirths, so every action has a key.
 
 ## The cast (12, $50–$50,000, $1–$500/sec)
 
@@ -21,7 +22,7 @@ Common: Soggy Crouton Kevin ($1/s), Sandal Lord Zorp ($3/s). Rare: Sprinkler Gob
 ($15/s). Epic: Cinderblock Cherub ($30/s), The Lawnmower Whisperer ($55/s). Legendary: Sir Soggybottom III ($95/s),
 Cosmic Grandma Brenda ($160/s). Mythic: Baron Von Washing Machine ($220/s), DJ Traffic Cone ($320/s). Secret:
 Grandpa Internet ($420/s), The Last Slice of Pizza ($500/s). Mutations: Normal ×1, Golden ×3, Rainbow ×5,
-Diamond ×10.
+Diamond ×10 — Rainbow and Diamond brainrots wear a visible glow shell, so a rare pull reads across the map.
 
 ## Layout
 
@@ -31,12 +32,14 @@ Diamond ×10.
 - `game.rbxl` is the place Rojo builds from `src/` and `default.project.json` (`rojo build default.project.json
   --output game.rbxl`). Never run Rojo over a Studio-saved place.
 - `src/shared/Cast.luau` — the cast, rarity ladder and every economy number, in one place.
-- `src/server/World.luau` — builds the 3D world in code: spawn plaza, conveyor, 8 bases, Grinder Pit, scenery.
+- `src/server/World.luau` — builds the 3D world in code: spawn plaza, conveyor, 8 bases, thief ring-walkway,
+  Grinder Pit, scenery.
 - `src/server/BrainrotFactory.luau` — builds each brainrot from parts, with its label and buy/steal prompts.
 - `src/server/State.luau` — all player state (money, income, bases, locks, rebirths, upgrades) in one place.
 - `src/server/init.server.luau` — the server loop: spawning, walking, income, stealing, slapping, the thief, the sweeper.
-- `src/client/Game.client.luau` — keyboard: F slap, L lock. `src/client/Hud.client.luau` — the HUD (money, income,
-  objective, feed, Lock/Upgrade/Rebirth buttons). The server owns all money; the client only displays it.
+- `src/client/Game.client.luau` — keyboard: F slap, L lock, U upgrade, R rebirth. `src/client/Hud.client.luau` —
+  the HUD (money, income, objective, feed, rebirths/upgrade level, Lock/Upgrade/Rebirth buttons). The server owns
+  all money; the client only displays it.
 - `screenshots/` holds three captures of the game running in Studio; the first by name is the cover and must also
   be the game's first thumbnail on Roblox. `PLAY.json` names the published place (still zeros until the owner
   publishes from Studio). `TOUR.json` is the optional reviewer tour (E to buy, L to lock).
@@ -47,3 +50,7 @@ Run it as the grader does, writing `out/` in place of `/output`:
 
 The rules are on the bounty's page (/bounty/roblox-brainrot-01) and in the kit's RULES.txt,
 which gives every command in order (Before you submit, then Enter).
+
+[![make.fun](https://make.fun/badge/roblox-brainrot-01.svg)](https://make.fun/bounty/roblox-brainrot-01)
+[![rank](https://make.fun/badge/roblox-brainrot-01/Takoyaki061/make-fun-roblox-brainrot/rank.svg)](https://make.fun/bounty/roblox-brainrot-01)
+[![reward](https://make.fun/badge/roblox-brainrot-01/Takoyaki061/make-fun-roblox-brainrot/reward.svg)](https://make.fun/bounty/roblox-brainrot-01)

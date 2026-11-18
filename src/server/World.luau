@@ -1,8 +1,8 @@
 -- World.luau — builds the whole 3D world out of parts, in code.
 -- One module, one job: spawn plaza, central conveyor, 8 player bases on a
--- ring, the Grinder Pit hazard, and the decorations that make the map read
--- as a place. Returns the built pieces the server loop needs (bases,
--- conveyor path, sweeper bar, spawn point).
+-- ring, the Grinder Pit hazard, a thief ring-walkway linking the base gates,
+-- and the decorations that make the map read as a place. Returns the built
+-- pieces the server loop needs (bases, conveyor path, sweeper bar, spawn).
 
 local World = {}
 
@@ -77,12 +77,13 @@ local function buildBase(folder, index, angleDeg)
 		padColor, Enum.Material.SmoothPlastic, base, Vector3.new(cx, 1, cz))
 	pad.TopSurface = Enum.SurfaceType.Smooth
 
-	-- Back wall, on the far side from the centre.
+	-- Back wall, on the far side from the centre. Its long axis (Z) runs
+	-- tangent to the ring, so it reads as a wall across the back of the pad.
 	local wallX = cx + math.cos(angle) * (BASE_SIZE / 2 + 1)
 	local wallZ = cz + math.sin(angle) * (BASE_SIZE / 2 + 1)
 	local wall = newPart("BackWall", Vector3.new(6, 16, BASE_SIZE),
 		padColor, Enum.Material.SmoothPlastic, base, Vector3.new(wallX, 8, wallZ))
-	wall.CFrame = CFrame.new(wallX, 8, wallZ) * CFrame.Angles(0, -angle + math.pi / 2, 0)
+	wall.CFrame = CFrame.new(wallX, 8, wallZ) * CFrame.Angles(0, -angle, 0)
 
 	-- Banner post with the base number, so players find their base fast.
 	local post = newPart("BannerPost", Vector3.new(2, 22, 2),
@@ -111,13 +112,15 @@ local function buildBase(folder, index, angleDeg)
 		end
 	end
 
-	-- Owner name board above the gate.
+	-- Owner name board above the gate. Its Front face must look toward the
+	-- map centre, or nobody approaching the base can read it.
+	local boardX = cx - math.cos(angle) * (BASE_SIZE / 2 + 1)
+	local boardZ = cz - math.sin(angle) * (BASE_SIZE / 2 + 1)
 	local board = newPart("OwnerBoard", Vector3.new(20, 8, 1),
 		Color3.fromRGB(30, 30, 40), Enum.Material.SmoothPlastic,
-		base, Vector3.new(cx - math.cos(angle) * (BASE_SIZE / 2 + 1), 14, cz - math.sin(angle) * (BASE_SIZE / 2 + 1)))
-	board.CFrame = CFrame.new(
-		cx - math.cos(angle) * (BASE_SIZE / 2 + 1), 14, cz - math.sin(angle) * (BASE_SIZE / 2 + 1))
-		* CFrame.Angles(0, -angle + math.pi / 2, 0)
+		base, Vector3.new(boardX, 14, boardZ))
+	board.CFrame = CFrame.new(boardX, 14, boardZ)
+		* CFrame.Angles(0, -angle - math.pi / 2, 0)
 	local gui = Instance.new("SurfaceGui")
 	gui.Name = "OwnerGui"
 	gui.Face = Enum.NormalId.Front
@@ -140,6 +143,24 @@ local function buildBase(folder, index, angleDeg)
 		ownerLabel = label,
 		pad = pad,
 	}
+end
+
+-- The thief ring: a pale walkway octagon linking every base gate, so a
+-- thief has one obvious route between bases and a victim can see them coming.
+local function buildWalkway(folder)
+	local ringRadius = 100
+	local chord = 2 * ringRadius * math.sin(math.rad(45 / 2))
+	for i = 1, BASE_COUNT do
+		local midDeg = 45 + (i - 1) * 45
+		local mid = math.rad(midDeg)
+		local x = math.cos(mid) * ringRadius
+		local z = math.sin(mid) * ringRadius
+		local segment = newPart("ThiefRing", Vector3.new(12, 1, chord),
+			Color3.fromRGB(220, 200, 160), Enum.Material.SmoothPlastic,
+			folder, Vector3.new(x, 1.1, z))
+		segment.CFrame = CFrame.new(x, 1.1, z) * CFrame.Angles(0, -mid, 0)
+		segment.TopSurface = Enum.SurfaceType.Smooth
+	end
 end
 
 -- The Grinder Pit: a sunken lava-coloured zone in the north-west with a
@@ -203,6 +224,7 @@ function World.buildWorld()
 
 	buildGround(folder)
 	buildConveyor(folder)
+	buildWalkway(folder)
 	local sweeperBar = buildHazard(folder)
 	buildScenery(folder)
 

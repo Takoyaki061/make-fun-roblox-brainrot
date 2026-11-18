@@ -76,6 +76,7 @@ function State.lockBase(player)
 end
 
 -- The money a player earns each second from their based brainrots.
+-- Each brainrot carries its definition on a StringValue tag, "name|mutation".
 function State.computeIncome(player)
 	local data = State.players[player]
 	if not data then
@@ -86,20 +87,8 @@ function State.computeIncome(player)
 		local tag = model:FindFirstChild("BrainrotDef")
 		if tag then
 			local name, mutationName = string.match(tag.Value, "^(.-)|(.+)$")
-			local def = nil
-			local mutation = nil
-			for _, d in ipairs(Cast.CHARACTERS) do
-				if d.name == name then
-					def = d
-					break
-				end
-			end
-			for _, m in ipairs(Cast.MUTATIONS) do
-				if m.name == mutationName then
-					mutation = m
-					break
-				end
-			end
+			local def = name and Cast.findCharacter(name)
+			local mutation = mutationName and Cast.findMutation(mutationName)
 			if def and mutation then
 				base += Cast.baseRate(def, mutation)
 			end
@@ -142,10 +131,15 @@ function State.buyBrainrot(player, model, def, mutation, slotPosition)
 end
 
 -- Move a brainrot from one player's base to another's (a completed steal).
+-- The destination's capacity is checked BEFORE the model leaves the victim,
+-- so a failed transfer never strands a brainrot owned by nobody.
 function State.transferBrainrot(model, fromPlayer, toPlayer, slotPosition)
 	local fromData = State.players[fromPlayer]
 	local toData = State.players[toPlayer]
 	if not fromData or not toData then
+		return false
+	end
+	if #toData.owned >= Cast.BASE_SLOTS then
 		return false
 	end
 	for i, owned in ipairs(fromData.owned) do
@@ -154,21 +148,18 @@ function State.transferBrainrot(model, fromPlayer, toPlayer, slotPosition)
 			break
 		end
 	end
-	if #toData.owned >= Cast.BASE_SLOTS then
-		return false
-	end
 	table.insert(toData.owned, model)
 	model:PivotTo(CFrame.new(slotPosition) * CFrame.Angles(0, math.pi, 0))
 	return true
 end
 
--- Free a slot position on a player's base for an incoming brainrot.
-function State.nextSlot(player)
+-- How many brainrots a player owns (nil when the player has no state).
+function State.ownedCount(player)
 	local data = State.players[player]
 	if not data then
 		return nil
 	end
-	return #data.owned + 1
+	return #data.owned
 end
 
 -- Slap: on cooldown, and only useful up close. The caller checks range.

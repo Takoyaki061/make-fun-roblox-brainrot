@@ -78,7 +78,6 @@ function Factory.attachLabel(model, def, mutation)
 	rateLabel.TextColor3 = Color3.fromRGB(120, 255, 120)
 	rateLabel.TextStrokeTransparency = 0
 	rateLabel.TextScaled = true
-	rarityLabel.Font = Enum.Font.GothamBold
 	rateLabel.Font = Enum.Font.GothamBold
 	rateLabel.Parent = gui
 end
@@ -108,6 +107,16 @@ function Factory.attachPrompt(model, kind, cost)
 	return prompt
 end
 
+-- A glow shell around the head, so Rainbow and Diamond brainrots read as
+-- special from across the map instead of only on their label.
+local function addGlowShell(model, color)
+	local shell = newPart("MutationGlow", Vector3.new(3.4, 3.4, 3.4), color, "Ball")
+	shell.Material = Enum.Material.Neon
+	shell.Transparency = 0.75
+	shell.CFrame = CFrame.new(0, 5.2, 0)
+	shell.Parent = model
+end
+
 -- Build the Model for one brainrot. Returns the model; the caller places it.
 function Factory.buildBrainrot(def, mutation)
 	local model = Instance.new("Model")
@@ -132,8 +141,9 @@ function Factory.buildBrainrot(def, mutation)
 		pupil.Parent = model
 	end
 
-	-- The silly prop it drags around, floating at its side.
-	local accent = newPart("Accent", Vector3.new(1.4, 1.4, 1.4), def.accentColor, "Ball")
+	-- The silly prop it drags around, floating at its side, named for what
+	-- it is so the place tree reads like the cast list.
+	local accent = newPart(def.accent, Vector3.new(1.4, 1.4, 1.4), def.accentColor, "Ball")
 	accent.CFrame = CFrame.new(2.4, 1.4, 0.6)
 	accent.Parent = model
 
@@ -144,16 +154,19 @@ function Factory.buildBrainrot(def, mutation)
 		leg.Parent = model
 	end
 
-	-- Mutation tint: golden brainrots shine, rainbow ones glow blue.
+	-- Mutation treatment: golden brainrots shine, rainbow ones glow blue,
+	-- diamond ones turn to glass with a bright shell.
 	if mutation.name == "Golden" then
 		body.Material = Enum.Material.Neon
 		head.Material = Enum.Material.Neon
 	elseif mutation.name == "Rainbow" then
 		body.Color = Color3.fromRGB(120, 200, 255)
 		body.Material = Enum.Material.Neon
+		addGlowShell(model, Color3.fromRGB(120, 200, 255))
 	elseif mutation.name == "Diamond" then
 		body.Material = Enum.Material.Glass
 		head.Material = Enum.Material.Glass
+		addGlowShell(model, Color3.fromRGB(180, 240, 255))
 	end
 
 	model.PrimaryPart = body
@@ -169,21 +182,11 @@ end
 
 -- Look a character definition up by name (used when a steal moves a model).
 function Factory.findDef(name)
-	for _, def in ipairs(Cast.CHARACTERS) do
-		if def.name == name then
-			return def
-		end
-	end
-	return nil
+	return Cast.findCharacter(name)
 end
 
 function Factory.findMutation(name)
-	for _, mut in ipairs(Cast.MUTATIONS) do
-		if mut.name == name then
-			return mut
-		end
-	end
-	return Cast.MUTATIONS[1]
+	return Cast.findMutation(name)
 end
 
 return Factory

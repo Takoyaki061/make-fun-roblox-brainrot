@@ -1,9 +1,10 @@
 -- Hud.client.luau — Brainrot Bazaar HUD.
 -- One script, one job: show the player what the server says is true —
--- money, income, collection progress, lock status — and give them big,
--- tappable buttons for Lock, Upgrade and Rebirth. Text is huge and
--- high-contrast so it stays readable when the screenshot is scaled down,
--- and nothing sits in the top-left corner (Roblox's menu buttons live there).
+-- money, income, collection progress, lock status, rebirths and upgrades —
+-- and give them big, tappable buttons for Lock, Upgrade and Rebirth. Text
+-- is huge and high-contrast so it stays readable when the screenshot is
+-- scaled down, and nothing sits in the top-left corner (Roblox's menu
+-- buttons live there).
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -61,9 +62,10 @@ local progressLabel = bigLabel("ProgressLabel", objectivePanel,
 	UDim2.new(0, 0, 0, 50), UDim2.new(1, 0, 0, 40),
 	"0 / 6", 32, Color3.fromRGB(255, 255, 255))
 
--- Top right: money and income. Far from the top-left menu buttons.
+-- Top right: money, income, lock status and progression. Far from the
+-- top-left menu buttons.
 local moneyPanel = panel("MoneyPanel", Vector2.new(1, 0),
-	UDim2.new(1, -16, 0, 12), UDim2.fromOffset(300, 110), Color3.fromRGB(20, 40, 20))
+	UDim2.new(1, -16, 0, 12), UDim2.fromOffset(300, 140), Color3.fromRGB(20, 40, 20))
 local moneyLabel = bigLabel("MoneyLabel", moneyPanel,
 	UDim2.new(0, 0, 0, 6), UDim2.new(1, 0, 0, 48),
 	"$100", 40, Color3.fromRGB(120, 255, 120))
@@ -73,6 +75,9 @@ local incomeLabel = bigLabel("IncomeLabel", moneyPanel,
 local lockLabel = bigLabel("LockLabel", moneyPanel,
 	UDim2.new(0, 0, 0, 82), UDim2.new(1, 0, 0, 24),
 	"", 22, Color3.fromRGB(255, 200, 80))
+local progressLine = bigLabel("ProgressLine", moneyPanel,
+	UDim2.new(0, 0, 0, 106), UDim2.new(1, 0, 0, 24),
+	"Rebirths 0  •  Conveyor Lv 0", 22, Color3.fromRGB(200, 220, 255))
 
 -- Bottom centre: what to do right now.
 local hintPanel = panel("HintPanel", Vector2.new(0.5, 1),
@@ -122,12 +127,22 @@ rebirthButton.MouseButton1Click:Connect(function()
 end)
 
 -- The server is the only source of numbers: refresh the HUD from snapshots.
+-- Same short money text as the server's Cast.formatMoney.
 local function formatMoney(amount)
 	amount = math.floor(amount + 0.5)
 	if amount >= 1000000 then
 		return string.format("$%.1fM", amount / 1000000)
+	elseif amount >= 10000 then
+		local s = tostring(amount)
+		local out = ""
+		while #s > 3 do
+			out = "," .. string.sub(s, -3) .. out
+			s = string.sub(s, 1, -4)
+		end
+		return "$" .. s .. out
+	else
+		return "$" .. tostring(amount)
 	end
-	return "$" .. tostring(amount)
 end
 
 stateEvent.OnClientEvent:Connect(function(snapshot)
@@ -146,6 +161,8 @@ stateEvent.OnClientEvent:Connect(function(snapshot)
 	else
 		lockLabel.Text = "Lock ready (L)"
 	end
+	progressLine.Text = "Rebirths " .. tostring(snapshot.rebirths)
+		.. "  •  Conveyor Lv " .. tostring(snapshot.upgrade)
 	upgradeButton.Text = "UPGRADE " .. formatMoney(snapshot.upgradeCost)
 	rebirthButton.Text = "REBIRTH " .. formatMoney(snapshot.rebirthCost)
 end)

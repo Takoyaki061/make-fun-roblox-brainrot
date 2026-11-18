@@ -14,6 +14,10 @@ local World = require(script:WaitForChild("World"))
 local Factory = require(script:WaitForChild("BrainrotFactory"))
 local State = require(script:WaitForChild("State"))
 
+-- Eight bases, eight players: a ninth joiner would otherwise be handed a
+-- base someone already owns, so the server is capped at the base count.
+Players.MaxPlayers = Cast.MAX_PLAYERS
+
 local world = World.buildWorld()
 
 -- Remotes: the client asks with BrainrotAction, the server answers with
@@ -48,7 +52,7 @@ local function claimBase()
 	end
 	local index = nextBase
 	nextBase += 1
-	if nextBase > 8 then
+	if nextBase > Cast.MAX_PLAYERS then
 		nextBase = 1
 	end
 	return index
@@ -57,6 +61,7 @@ end
 -- Conveyor walkers: brainrots strolling from the south end to the arch.
 local walkers = {} -- { model, def, mutation, speed }
 local activeSteals = {} -- [thiefPlayer] = model being stolen
+local stealBlockedUntil = {} -- [thiefPlayer] = os.clock() until which stealing is banned (after a slap)
 
 local function spawnBrainrot()
 	if #walkers >= Cast.CONVEYOR_MAX then
@@ -150,6 +155,12 @@ onStealComplete = function(thief, model)
 		return
 	end
 	activeSteals[thief] = nil
+	-- A thief slapped off a base cannot start another steal for a while.
+	local blockedUntil = stealBlockedUntil[thief]
+	if blockedUntil and os.clock() < blockedUntil then
+		announce(thief.Name .. " is still shaken from that slap — no stealing yet!")
+		return
+	end
 	-- Find whose base this brainrot sits on.
 	local victim = nil
 	for player, data in pairs(State.players) do
@@ -198,6 +209,8 @@ local function slapPlayer(player)
 			local thiefRoot = thief.Character:FindFirstChild("HumanoidRootPart")
 			if thiefRoot and (thiefRoot.Position - root.Position).Magnitude <= Cast.SLAP_RANGE then
 				activeSteals[thief] = nil
+				-- A slapped thief cannot steal again for a few seconds.
+				stealBlockedUntil[thief] = os.clock() + Cast.SLAP_STEAL_BAN
 				local prompt = model:FindFirstChild("STEALPrompt", true)
 				if prompt then
 					prompt.Enabled = false
@@ -405,11 +418,14 @@ actionEvent.OnServerEvent:Connect(function(player, action)
 		local ok, message = State.lockBase(player)
 		if ok then
 			-- A visible padlock on the base, so thieves reroute instead of
-			-- wasting a steal attempt on a locked base.
+			-- wasting a steal attempt on a locked base. The label only
+			-- reverts once the lock has actually run out, so re-locking
+			-- inside the window cannot clear it early.
 			local base = world.bases[data.baseIndex]
 			base.ownerLabel.Text = "LOCKED - " .. string.upper(player.Name) .. "'s BASE"
 			task.delay(Cast.LOCK_SECONDS, function()
-				if State.getPlayer(player) and world.bases[data.baseIndex] then
+				if State.getPlayer(player) and world.bases[data.baseIndex]
+					and not State.isBaseLocked(data.baseIndex) then
 					world.bases[data.baseIndex].ownerLabel.Text = string.upper(player.Name) .. "'s BASE"
 				end
 			end)
@@ -449,6 +465,9 @@ end
 
 Players.PlayerAdded:Connect(onPlayerAdded)
 Players.PlayerRemoving:Connect(function(player)
+	-- A leaver mid-steal must not leave a stale entry behind.
+	activeSteals[player] = nil
+	stealBlockedUntil[player] = nil
 	State.removePlayer(player)
 end)
 for _, player in ipairs(Players:GetPlayers()) do

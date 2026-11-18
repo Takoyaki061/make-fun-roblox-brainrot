@@ -8,6 +8,7 @@ local Cast = {}
 
 Cast.START_MONEY = 100
 Cast.BASE_SLOTS = 6
+Cast.MAX_PLAYERS = 8 -- one base each; the server caps the server at this
 Cast.MAX_REBIRTHS = 10
 Cast.REBIRTH_COST = 25000 -- cash needed, times (rebirths + 1)
 Cast.REBIRTH_BONUS = 0.5 -- +50% income per rebirth
@@ -19,9 +20,10 @@ Cast.LOCK_COOLDOWN = 60
 Cast.STEAL_SECONDS = 5 -- hold time to steal from another player's base
 Cast.SLAP_RANGE = 14
 Cast.SLAP_COOLDOWN = 4
+Cast.SLAP_STEAL_BAN = 10 -- seconds a slapped thief cannot start a steal
 Cast.SPAWN_INTERVAL = 4 -- a new brainrot walks onto the conveyor this often
 Cast.CONVEYOR_MAX = 10
-Cast.THIEF_INTERVAL = 75 -- a Sneaky Snatcher raids a random base this often
+Cast.THIEF_INTERVAL = 60 -- a Sneaky Snatcher raids a random base this often
 Cast.THIEF_STEAL_SECONDS = 8
 
 -- Mutation rolls: most brainrots are Normal; a lucky few are worth far more.
@@ -81,6 +83,26 @@ Cast.RARITY_COLORS = {
 	Mythic = Color3.fromRGB(255, 60, 90),
 	Secret = Color3.fromRGB(60, 255, 170),
 }
+
+-- Look a character definition up by name (nil when the name is unknown).
+function Cast.findCharacter(name)
+	for _, def in ipairs(Cast.CHARACTERS) do
+		if def.name == name then
+			return def
+		end
+	end
+	return nil
+end
+
+-- Look a mutation up by name; unknown names fall back to Normal.
+function Cast.findMutation(name)
+	for _, mut in ipairs(Cast.MUTATIONS) do
+		if mut.name == name then
+			return mut
+		end
+	end
+	return Cast.MUTATIONS[1]
+end
 
 -- Pick a random character, weighted so commons flood the conveyor and
 -- secrets almost never show up.
