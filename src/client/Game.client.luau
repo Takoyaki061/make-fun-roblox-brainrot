@@ -1,35 +1,36 @@
--- Game.client.luau — Brainrot Bazaar client input.
--- One script, one job: keyboard shortcuts for the actions that matter in a
--- chase (F slap, L lock base) and at the base (U upgrade, R rebirth).
--- Buying uses the on-screen E prompt on each brainrot; the buttons live in
--- Hud.client.luau. Nothing here touches money: every action is just a
--- request the server validates. Keys are read with InputBegan and the
--- gameProcessedEvent guard, so typing in chat never fires an action.
+-- Game.client.luau
+-- Keyboard shortcuts only. Buying uses the on-screen E prompt; the
+-- keys below fire an action string at the server through
+-- BrainrotAction, and the server validates everything.
+--
+--   F -> Slap      L -> Lock base
+--   U -> Upgrade   R -> Rebirth
+--
+-- gameProcessedEvent is checked so typing in chat never fires an action.
 
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
-local actionEvent = ReplicatedStorage:WaitForChild("BrainrotAction")
+local ActionRemote = ReplicatedStorage:WaitForChild("BrainrotAction")
 
--- Fire one action at the server. The server checks cooldowns and costs.
-local function sendAction(action)
-	actionEvent:FireServer(action)
-end
-
--- One key per action, so a player mid-chase never has to find the mouse.
-local KEY_ACTIONS = {
+local KEYS = {
 	[Enum.KeyCode.F] = "Slap",
 	[Enum.KeyCode.L] = "Lock",
 	[Enum.KeyCode.U] = "Upgrade",
 	[Enum.KeyCode.R] = "Rebirth",
 }
 
-UserInputService.InputBegan:Connect(function(input, gameProcessedEvent)
-	if gameProcessedEvent then
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if gameProcessed then
 		return
 	end
-	local action = KEY_ACTIONS[input.KeyCode]
+	local action = KEYS[input.KeyCode]
 	if action then
-		sendAction(action)
+		ActionRemote:FireServer(action)
 	end
 end)
+
+-- Keep the local player reference warm so the script stays alive and
+-- the client is ready the moment the server sends its first snapshot.
+local _player = Players.LocalPlayer

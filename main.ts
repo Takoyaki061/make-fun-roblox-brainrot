@@ -1,46 +1,74 @@
-// Brainrot Bazaar — the roblox-brainrot-01 entry for @takoyaki061: a 3D
-// brainrot game (Rojo project, built into game.rbxl with `rojo build
-// default.project.json --output game.rbxl`). Players buy absurd meme
-// brainrots off a central conveyor, park them on their base to earn $/sec,
-// climb rarities and mutations, rebirth, and defend against player steals,
-// the Sneaky Snatcher thief and the Grinder Pit.
-// This program hands the game in: it copies game.rbxl, src/, screenshots/
-// and PLAY.json from beside this file to /output and writes
-// /output/dossier.json, the summary the judge reads, with the vendored
-// make.fun library (vendor/makefun-roblox.ts, the kit's copy, unchanged).
-// A working roblox-brainrot-01 entry (Node 22, standard library only).
+// main.ts
+// The entrypoint for Brainrot Bazaar (roblox-brainrot-01). A Node 22
+// program, standard library only. It hands the game in: it copies
+// game.rbxl, PLAY.json, src/ and screenshots/ from beside itself to
+// /output (or $MAKEFUN_OUTPUT_DIR when set) and writes
+// /output/dossier.json with the vendored library's dossier builder.
 //
-// Every name under /output starts with a letter, a digit or _ and holds only
-// letters, digits, . _ and -: the grader fails an entry whose output holds
-// any other, so a file such as .gitkeep or .DS_Store copied in fails it.
-// So src/ and screenshots/ are copied without any name that starts with a
-// dot, at any depth.
+// Nothing whose name starts with a dot (.gitkeep, .DS_Store, .git)
+// is ever copied, at any depth -- the grader fails an entry whose
+// output holds one.
 //
-// Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
+// Run it as the grader does, writing out/ in place of /output:
+//
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 
-import { copyFileSync, cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { buildDossier } from './vendor/makefun-roblox.ts';
+import { copyFileSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { buildDossier } from "./vendor/makefun-roblox.ts";
 
-const here = fileURLToPath(new URL('.', import.meta.url));
-const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
+const HERE = dirname(fileURLToPath(import.meta.url));
+const OUT = process.env.MAKEFUN_OUTPUT_DIR
+	? resolve(process.env.MAKEFUN_OUTPUT_DIR)
+	: "/output";
 
-/** cpSync's filter: leave out every file and directory whose name starts with a dot (.gitkeep, .DS_Store, .git). */
-const notDotted = (path: string): boolean => !basename(path).startsWith('.');
+// A name is copyable when it does not start with a dot. The grader
+// refuses any dot-named file or directory under /output.
+function copyable(name: string): boolean {
+	return !name.startsWith(".");
+}
 
-mkdirSync(out, { recursive: true });
-copyFileSync(join(here, 'game.rbxl'), join(out, 'game.rbxl'));
-copyFileSync(join(here, 'PLAY.json'), join(out, 'PLAY.json'));
-cpSync(join(here, 'src'), join(out, 'src'), { recursive: true, filter: notDotted });
-mkdirSync(join(out, 'screenshots'), { recursive: true });
-if (existsSync(join(here, 'screenshots'))) cpSync(join(here, 'screenshots'), join(out, 'screenshots'), { recursive: true, filter: notDotted });
+function copyTree(srcDir: string, destDir: string): void {
+	mkdirSync(destDir, { recursive: true });
+	for (const entry of readdirSync(srcDir)) {
+		if (!copyable(entry)) {
+			continue;
+		}
+		const src = join(srcDir, entry);
+		const dest = join(destDir, entry);
+		if (statSync(src).isDirectory()) {
+			copyTree(src, dest);
+		} else {
+			copyFileSync(src, dest);
+		}
+	}
+}
 
-// The scorer's own caps (reference/gate.json): only text_max_bytes shapes the bytes; the others refuse an entry the
-// scorer would refuse (more than 4 screenshots or one over 256 KiB; a place of more than 500000 instances, whose
-// scripts' sources come to over 8 MiB or whose scripts' paths come to over 1048576 characters, in all).
+function copyFile(name: string): void {
+	const src = join(HERE, name);
+	if (!copyable(name)) {
+		return;
+	}
+	copyFileSync(src, join(OUT, name));
+}
+
+mkdirSync(OUT, { recursive: true });
+
+copyFile("game.rbxl");
+copyFile("PLAY.json");
+copyTree(join(HERE, "src"), join(OUT, "src"));
+copyTree(join(HERE, "screenshots"), join(OUT, "screenshots"));
+
 writeFileSync(
-  join(out, 'dossier.json'),
-  buildDossier(out, { text_max_bytes: 65536, screenshots: { max: 4, max_bytes: 262144 }, max_instances: 500000, scripts_max_source_bytes: 8388608, scripts_max_path_chars: 1048576 }),
+	join(OUT, "dossier.json"),
+	buildDossier(OUT, {
+		text_max_bytes: 65536,
+		screenshots: { max: 4, max_bytes: 262144 },
+		max_instances: 500000,
+		scripts_max_source_bytes: 8388608,
+		scripts_max_path_chars: 1048576,
+	}),
 );
+
+console.log("Brainrot Bazaar handed in to " + OUT);
