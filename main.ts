@@ -1,3 +1,11 @@
+// Brainrot Bazaar — the roblox-brainrot-01 entry for @takoyaki061: a 3D brainrot
+// game (Rojo project, built into game.rbxl with `rojo build default.project.json
+// --output game.rbxl`). Players buy absurd meme brainrots off a central conveyor,
+// park them on their base to earn $/sec, climb rarities and mutations, rebirth,
+// and defend against player steals, the Sneaky Snatcher thief and the Grinder Pit.
+// This program hands the game in: it copies game.rbxl, src/, screenshots/ and
+// PLAY.json from beside this file to /output and writes /output/dossier.json,
+// the summary the judge reads, with the vendored make.fun library.
 // A working roblox-brainrot-01 entry (Node 22, standard library only): the game is this directory's Rojo
 // project, built into game.rbxl with `rojo build default.project.json --output game.rbxl`, and the program
 // hands it in. It copies game.rbxl, src/, screenshots/ and PLAY.json from beside this file to /output and
