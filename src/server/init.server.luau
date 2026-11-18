@@ -10,9 +10,13 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local Cast = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Cast"))
-local World = require(script:WaitForChild("World"))
-local Factory = require(script:WaitForChild("BrainrotFactory"))
-local State = require(script:WaitForChild("State"))
+-- NOTE: World/State/BrainrotFactory are SIBLINGS of this script (children of
+-- the Server folder), not children of the script itself, so require them
+-- through script.Parent. (script:WaitForChild("World") yields forever and
+-- the world never builds, which is what the first Play test showed.)
+local World = require(script.Parent:WaitForChild("World"))
+local Factory = require(script.Parent:WaitForChild("BrainrotFactory"))
+local State = require(script.Parent:WaitForChild("State"))
 
 -- Eight bases, eight players: a ninth joiner would otherwise be handed a
 -- base someone already owns, so the server is capped at the base count.
