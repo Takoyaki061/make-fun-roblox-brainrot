@@ -1,36 +1,34 @@
--- Game.client.luau
--- Keyboard shortcuts only. Buying uses the on-screen E prompt; the
--- keys below fire an action string at the server through
--- BrainrotAction, and the server validates everything.
---
---   F -> Slap      L -> Lock base
---   U -> Upgrade   R -> Rebirth
---
--- gameProcessedEvent is checked so typing in chat never fires an action.
+-- Game.client.luau — Brainrot Bazaar: keyboard shortcuts only.
+-- F slaps, L locks the base, U buys a Golden Conveyor upgrade, R rebirths.
+-- Each fires its action string at the server through BrainrotAction; the
+-- server validates everything. Buying uses the on-screen E prompt, not a key.
+-- gameProcessedEvent guards every handler so typing in chat never fires one.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
-local ActionRemote = ReplicatedStorage:WaitForChild("BrainrotAction")
+local BrainrotAction = ReplicatedStorage:WaitForChild("BrainrotAction")
 
-local KEYS = {
+local ACTIONS = {
 	[Enum.KeyCode.F] = "Slap",
 	[Enum.KeyCode.L] = "Lock",
 	[Enum.KeyCode.U] = "Upgrade",
 	[Enum.KeyCode.R] = "Rebirth",
 }
 
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	if gameProcessed then
+local player = Players.LocalPlayer
+
+UserInputService.InputBegan:Connect(function(input, gameProcessedEvent)
+	if gameProcessedEvent then
 		return
 	end
-	local action = KEYS[input.KeyCode]
+	local action = ACTIONS[input.KeyCode]
 	if action then
-		ActionRemote:FireServer(action)
+		BrainrotAction:FireServer(action)
 	end
 end)
 
--- Keep the local player reference warm so the script stays alive and
--- the client is ready the moment the server sends its first snapshot.
-local _player = Players.LocalPlayer
+-- Keep the player out of the top-left corner's way: nothing here draws UI.
+-- (Roblox's menu buttons live there; the HUD in Hud.client.luau stays clear.)
+print("Brainrot Bazaar client controls ready: F slap, L lock, U upgrade, R rebirth.")

@@ -1,378 +1,408 @@
--- State.luau
--- All player state for Brainrot Bazaar, in one place. The server owns
--- every number here; the client only ever sees snapshots.
---
--- A record holds one player's money, progression, base, owned
--- brainrot models, lock timers and slap timers. Bases are handed out
--- in order and returned to the free list when a player leaves, so a
--- freed base is always the next one claimed.
+-- State.luau — Brainrot Bazaar: all player state lives here, in one place.
+-- The server owns all money; the client only ever displays what this module
+-- reports through snapshots. A brainrot model carries its identity in a
+-- StringValue named "BrainrotDef" holding "name|mutation".
 
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Cast = require(ReplicatedStorage.Shared.Cast)
+local Cast = require(game:GetService("ReplicatedStorage"):WaitForChild("Shared"):WaitForChild("Cast"))
 
 local State = {}
 
-local players = {} -- [Player] = record
-local baseOwners = {} -- [baseIndex] = Player
-local freeBases = {} -- list of base indices with no owner, in order
+-- ---------------------------------------------------------------------------
+-- Tables
+-- ---------------------------------------------------------------------------
+-- players[player] = { money, rebirths, upgrade, baseIndex, owned = {models},
+--   lockUntil, lockReadyAt, lastSlap, stealBanUntil }
+local players = {}
+-- baseOwners[baseIndex] = player
+local baseOwners = {}
+-- freeBases: a queue of base indices with no owner; register() pops the front.
+local freeBases = {}
 
--- Call once at server start with the number of bases the world built.
-function State.setup(baseCount)
+local START_TIME = os.clock()
+
+local function now()
+	return os.clock()
+end
+
+--- Prepare the base queue (1..baseCount) before the first player joins.
+function State.initBases(baseCount)
+	freeBases = {}
 	for i = 1, baseCount do
 		table.insert(freeBases, i)
 	end
 end
 
--- Claim the next free base for a joining player and give them their
--- starting money. Returns the record, or nil when the server is full.
+-- ---------------------------------------------------------------------------
+-- Join / leave
+-- ---------------------------------------------------------------------------
+
+--- Claim the next free base for a joining player and give them start money.
+--- Returns the player's record, or nil when no base is free.
 function State.register(player)
-	if #freeBases == 0 then
-		return nil
+	if players[player] then
+		return players[player]
 	end
 	local baseIndex = table.remove(freeBases, 1)
+	if not baseIndex then
+		return nil
+	end
 	local record = {
-		player = player,
 		money = Cast.START_MONEY,
 		rebirths = 0,
 		upgrade = 0,
 		baseIndex = baseIndex,
 		owned = {},
-		slots = {}, -- [model] = slot index 1..BASE_SLOTS
 		lockUntil = 0,
 		lockReadyAt = 0,
-		lastSlapAt = -math.huge,
-		slapBanUntil = 0,
+		lastSlap = 0,
+		lastSteal = 0,
+		stealBanUntil = 0,
 	}
 	players[player] = record
 	baseOwners[baseIndex] = player
 	return record
 end
 
--- A leaving player loses their brainrots and gives their base back.
--- Returns the record so the caller can announce the departure.
+--- A leaving player: destroy their owned brainrots, free their base.
 function State.remove(player)
 	local record = players[player]
 	if not record then
-		return nil
+		return
 	end
 	for _, model in ipairs(record.owned) do
-		if model.Parent then
+		if model and model.Parent then
 			model:Destroy()
 		end
 	end
-	record.owned = {}
-	record.slots = {}
 	baseOwners[record.baseIndex] = nil
 	table.insert(freeBases, record.baseIndex)
-	table.sort(freeBases)
 	players[player] = nil
-	return record
 end
 
+--- The record for a player, or nil.
 function State.get(player)
 	return players[player]
 end
 
-function State.allRecords()
-	local list = {}
-	for _, record in pairs(players) do
-		table.insert(list, record)
-	end
-	return list
-end
-
+--- The owner of a base index, or nil.
 function State.baseOwner(baseIndex)
 	return baseOwners[baseIndex]
-end
-
-function State.freeBaseCount()
-	return #freeBases
 end
 
 -- ---------------------------------------------------------------------------
 -- Locks
 -- ---------------------------------------------------------------------------
 
-function State.isBaseLocked(record, now)
-	return now < record.lockUntil
-end
-
-function State.lockSecondsLeft(record, now)
-	return math.max(0, record.lockUntil - now)
-end
-
-function State.lockCooldownLeft(record, now)
-	return math.max(0, record.lockReadyAt - now)
-end
-
--- Lock the player's own base for LOCK_SECONDS. Returns ok + a message
--- for the feed. A lock on cooldown is refused.
-function State.lockBase(player, now)
+--- True while the player's base lock is still running.
+function State.isBaseLocked(player)
 	local record = players[player]
 	if not record then
-		return false, "no base to lock"
+		return false
 	end
-	if now < record.lockReadyAt then
-		local wait = math.ceil(record.lockReadyAt - now)
-		return false, "lock recharging: " .. wait .. "s left"
+	return now() < record.lockUntil
+end
+
+--- Lock the player's own base for 20 s (60 s cooldown).
+--- Returns success, message.
+function State.lockBase(player)
+	local record = players[player]
+	if not record then
+		return false, "No base to lock."
 	end
-	if State.isBaseLocked(record, now) then
-		return false, "base already locked"
+	local t = now()
+	if t < record.lockUntil then
+		return false, "Your base is already locked."
 	end
-	record.lockUntil = now + Cast.LOCK_SECONDS
-	record.lockReadyAt = now + Cast.LOCK_COOLDOWN
-	return true, "base locked for " .. Cast.LOCK_SECONDS .. "s"
+	if t < record.lockReadyAt then
+		return false, "Lock recharging — " .. math.ceil(record.lockReadyAt - t) .. "s left."
+	end
+	record.lockUntil = t + Cast.LOCK_SECONDS
+	record.lockReadyAt = t + Cast.LOCK_COOLDOWN
+	return true, "Base locked for " .. Cast.LOCK_SECONDS .. "s!"
 end
 
 -- ---------------------------------------------------------------------------
 -- Income
 -- ---------------------------------------------------------------------------
 
--- Read a brainrot model's "name|mutation" tag and price its $/sec.
-local function modelRate(model)
+--- A brainrot's $/sec from its BrainrotDef tag, times the player's multiplier.
+-- A brainrot stolen within the last 120 s earns only half: stealing skips the
+-- whole climb otherwise, so a fresh thief cannot walk off with a $500/s prize
+-- at full power. The halving is stamped on the model, not the player, so it
+-- survives the model changing hands again.
+local function rateOfModel(model, record)
 	local tag = model:FindFirstChild("BrainrotDef")
-	if not tag or not tag:IsA("StringValue") then
+	if not tag or typeof(tag.Value) ~= "string" then
 		return 0
 	end
-	local sep = string.find(tag.Value, "|", 1, true)
-	if not sep then
-		return 0
-	end
-	local def = Cast.getCharacter(string.sub(tag.Value, 1, sep - 1))
+	local name, mutation = string.match(tag.Value, "^(.-)|(.+)$")
+	local def = Cast.findCharacter(name)
 	if not def then
 		return 0
 	end
-	local mutation = string.sub(tag.Value, sep + 1)
-	return Cast.baseRate(def, mutation)
+	local rate = Cast.baseRate(def, mutation) * Cast.incomeMultiplier(record.rebirths, record.upgrade)
+	local stolenAt = model:GetAttribute("StolenAt")
+	if stolenAt and (os.clock() - stolenAt) < 120 then
+		rate *= 0.5
+	end
+	return rate
 end
 
-function State.computeIncome(record)
+--- A player's total $/sec, rounded to the nearest dollar.
+function State.computeIncome(player)
+	local record = players[player]
+	if not record then
+		return 0
+	end
 	local total = 0
 	for _, model in ipairs(record.owned) do
-		total += modelRate(model)
-	end
-	local multiplied = total * Cast.incomeMultiplier(record.rebirths, record.upgrade)
-	return math.floor(multiplied + 0.5)
-end
-
--- Pay every player one second of income. The server loop calls this
--- once a second.
-function State.collectIncome()
-	for _, record in pairs(players) do
-		record.money += State.computeIncome(record)
-	end
-end
-
-function State.ownedCount(record)
-	return #record.owned
-end
-
--- First free display slot on a base (1..BASE_SLOTS), or nil when full.
--- Slot indices are tracked per model so a stolen middle slot is
--- reused instead of colliding with the brainrot already standing there.
-function State.nextSlot(record)
-	local used = {}
-	for _, index in pairs(record.slots) do
-		used[index] = true
-	end
-	for i = 1, Cast.BASE_SLOTS do
-		if not used[i] then
-			return i
+		if model and model.Parent then
+			total += rateOfModel(model, record)
 		end
 	end
-	return nil
+	return math.floor(total + 0.5)
+end
+
+--- Pay every player one second of income.
+function State.collectIncome()
+	for player in pairs(players) do
+		local record = players[player]
+		if record then
+			record.money += State.computeIncome(player)
+		end
+	end
 end
 
 -- ---------------------------------------------------------------------------
--- Buying
+-- Buying and stealing
 -- ---------------------------------------------------------------------------
 
--- Park a conveyor brainrot on the buyer's base. Checks capacity and
--- money first; on failure nothing moves and nothing is charged.
--- slotCFrame faces the model toward the base gate. The BUY prompt is
--- destroyed so the parked brainrot can only be stolen, not re-bought.
+--- How many brainrots a player owns (models still in the world).
+function State.ownedCount(player)
+	local record = players[player]
+	if not record then
+		return 0
+	end
+	local count = 0
+	for _, model in ipairs(record.owned) do
+		if model and model.Parent then
+			count += 1
+		end
+	end
+	return count
+end
+
+--- Buy a conveyor brainrot: checks slot space and money, pays, parks the
+--- model on the given slot position facing the base gate, and removes its
+--- BUY prompt so it can never be bought twice.
+--- Returns success, message.
 function State.buyBrainrot(player, model, slotCFrame)
 	local record = players[player]
 	if not record then
-		return false, "no base yet"
-	end
-	local slotIndex = State.nextSlot(record)
-	if not slotIndex then
-		return false, "base is full"
+		return false, "You have no base yet."
 	end
 	local tag = model:FindFirstChild("BrainrotDef")
 	if not tag then
-		return false, "not a brainrot"
+		return false, "That brainrot has no price tag."
 	end
-	local sep = string.find(tag.Value, "|", 1, true)
-	local def = sep and Cast.getCharacter(string.sub(tag.Value, 1, sep - 1)) or nil
+	local name, mutation = string.match(tag.Value, "^(.-)|(.+)$")
+	local def = Cast.findCharacter(name)
 	if not def then
-		return false, "unknown brainrot"
+		return false, "Unknown brainrot."
+	end
+	if State.ownedCount(player) >= Cast.BASE_SLOTS then
+		return false, "Your base is full — rebirth to make room!"
 	end
 	if record.money < def.cost then
-		return false, "need " .. Cast.formatMoney(def.cost)
+		return false, "Not enough money — need " .. Cast.formatMoney(def.cost) .. "."
 	end
 	record.money -= def.cost
-	model:PivotTo(slotCFrame)
-	local buyPrompt = model:FindFirstChild("BuyPrompt")
-	if buyPrompt then
-		buyPrompt:Destroy()
-	end
 	table.insert(record.owned, model)
-	record.slots[model] = slotIndex
-	return true, "bought " .. def.name .. " for " .. Cast.formatMoney(def.cost), slotIndex
-end
-
--- ---------------------------------------------------------------------------
--- Stealing
--- ---------------------------------------------------------------------------
--- Move a brainrot from one player's base to another's. The destination
--- capacity is checked BEFORE the model leaves the victim, so a failed
--- transfer can never strand a brainrot between bases.
-
-function State.transferBrainrot(model, fromPlayer, toPlayer, slotCFrame)
-	local fromRecord = players[fromPlayer]
-	local toRecord = players[toPlayer]
-	if not fromRecord or not toRecord then
-		return false, "player gone"
-	end
-	if #toRecord.owned >= Cast.BASE_SLOTS then
-		return false, "your base is full"
-	end
-	local slotIndex = State.nextSlot(toRecord)
-	if not slotIndex then
-		return false, "your base is full"
-	end
-	local slot = table.find(fromRecord.owned, model)
-	if not slot then
-		return false, "already gone"
-	end
-	table.remove(fromRecord.owned, slot)
-	fromRecord.slots[model] = nil
 	model:PivotTo(slotCFrame)
-	table.insert(toRecord.owned, model)
-	toRecord.slots[model] = slotIndex
-	return true, "stolen", slotIndex
+	local prompt = model:FindFirstChildOfClass("ProximityPrompt")
+	if prompt then
+		prompt:Destroy()
+	end
+	return true, "Bought " .. def.name .. " (" .. mutation .. ") for " .. Cast.formatMoney(def.cost) .. "!"
 end
 
--- Remove one owned brainrot without a destination (the Snatcher
--- destroys what it takes). Returns the model or nil.
-function State.takeBrainrot(fromPlayer, model)
-	local record = players[fromPlayer]
+--- Move a brainrot from a victim's base to the thief's next slot.
+--- Capacity is checked BEFORE the model is removed from the victim, so a
+--- failed transfer can never strand a brainrot between bases. A successful
+--- steal stamps the model so it earns half income for 120 s, and starts the
+--- thief's 15 s steal cooldown.
+--- Returns success, message.
+function State.transferBrainrot(thief, victim, model, slotCFrame)
+	local thiefRecord = players[thief]
+	local victimRecord = players[victim]
+	if not thiefRecord or not victimRecord then
+		return false, "Steal failed."
+	end
+	if State.ownedCount(thief) >= Cast.BASE_SLOTS then
+		return false, "Your base is full — no room for a stolen brainrot!"
+	end
+	-- Find and remove from the victim's list first, then park it.
+	local found = false
+	for i, owned in ipairs(victimRecord.owned) do
+		if owned == model then
+			table.remove(victimRecord.owned, i)
+			found = true
+			break
+		end
+	end
+	if not found then
+		return false, "That brainrot is already gone."
+	end
+	table.insert(thiefRecord.owned, model)
+	model:PivotTo(slotCFrame)
+	model:SetAttribute("StolenAt", now())
+	thiefRecord.lastSteal = now()
+	return true, "Stolen!"
+end
+
+--- True when the player's steal cooldown (15 s between successful steals)
+--- has run out. A fresh $100 player cannot chain-steal a whole base in
+--- seconds; each steal has to be earned one at a time.
+function State.canSteal(player)
+	local record = players[player]
 	if not record then
-		return nil
+		return false
 	end
-	local slot = table.find(record.owned, model)
-	if not slot then
-		return nil
+	return now() - record.lastSteal >= 15
+end
+
+--- Forget a model a player no longer owns (e.g. the Snatcher destroyed it).
+function State.dropBrainrot(player, model)
+	local record = players[player]
+	if not record then
+		return
 	end
-	table.remove(record.owned, slot)
-	record.slots[model] = nil
-	return model
+	for i, owned in ipairs(record.owned) do
+		if owned == model then
+			table.remove(record.owned, i)
+			return
+		end
+	end
 end
 
 -- ---------------------------------------------------------------------------
 -- Slap
 -- ---------------------------------------------------------------------------
 
-function State.canSlap(player, now)
+--- True when the player's slap is off cooldown; records the slap time.
+function State.canSlap(player)
 	local record = players[player]
 	if not record then
 		return false
 	end
-	return (now - record.lastSlapAt) >= Cast.SLAP_COOLDOWN
+	local t = now()
+	if t - record.lastSlap < Cast.SLAP_COOLDOWN then
+		return false
+	end
+	record.lastSlap = t
+	return true
 end
 
-function State.markSlap(player, now)
+--- Ban a player from stealing for 10 s (they were just slapped).
+function State.banStealing(player)
 	local record = players[player]
 	if record then
-		record.lastSlapAt = now
+		record.stealBanUntil = now() + Cast.SLAPPED_STEAL_BAN
 	end
 end
 
--- A slapped thief may not start a steal until this time passes.
-function State.banStealing(player, now)
-	local record = players[player]
-	if record then
-		record.slapBanUntil = now + Cast.SLAP_BAN_SECONDS
-	end
-end
-
-function State.isStealBanned(player, now)
+--- True while the player's steal ban is still running.
+function State.isStealBanned(player)
 	local record = players[player]
 	if not record then
-		return true
+		return false
 	end
-	return now < record.slapBanUntil
+	return now() < record.stealBanUntil
 end
 
 -- ---------------------------------------------------------------------------
--- Progression
+-- Rebirth and upgrade
 -- ---------------------------------------------------------------------------
 
+--- Rebirth: checks the cap and the money, then resets money to start,
+--- adds one rebirth, and destroys every owned brainrot.
+--- Returns success, message.
 function State.rebirthPlayer(player)
 	local record = players[player]
 	if not record then
-		return false, "no base yet"
+		return false, "You have no base yet."
 	end
 	if record.rebirths >= Cast.MAX_REBIRTHS then
-		return false, "max rebirths reached"
+		return false, "Max rebirths reached!"
 	end
 	local cost = Cast.rebirthCost(record.rebirths)
 	if record.money < cost then
-		return false, "need " .. Cast.formatMoney(cost) .. " to rebirth"
+		return false, "Rebirth costs " .. Cast.formatMoney(cost) .. "."
 	end
 	for _, model in ipairs(record.owned) do
-		if model.Parent then
+		if model and model.Parent then
 			model:Destroy()
 		end
 	end
 	record.owned = {}
-	record.slots = {}
 	record.money = Cast.START_MONEY
 	record.rebirths += 1
-	return true, "rebirth " .. record.rebirths .. "! +50% income forever"
+	return true, "REBIRTH! Permanent +" .. math.floor(Cast.REBIRTH_INCOME_BONUS * 100) .. "% income forever."
 end
 
+--- Buy the next Golden Conveyor upgrade: checks the cap and the money.
+--- Returns success, message.
 function State.buyUpgrade(player)
 	local record = players[player]
 	if not record then
-		return false, "no base yet"
+		return false, "You have no base yet."
 	end
-	if record.upgrade >= Cast.UPGRADE_MAX then
-		return false, "conveyor maxed out"
+	if record.upgrade >= Cast.MAX_UPGRADE then
+		return false, "Conveyor is maxed out!"
 	end
 	local cost = Cast.upgradeCost(record.upgrade)
 	if record.money < cost then
-		return false, "need " .. Cast.formatMoney(cost) .. " to upgrade"
+		return false, "Upgrade costs " .. Cast.formatMoney(cost) .. "."
 	end
 	record.money -= cost
 	record.upgrade += 1
-	return true, "conveyor level " .. record.upgrade .. " (+25% income)"
+	return true, "Golden Conveyor Lv " .. record.upgrade .. " — +25% income!"
 end
 
 -- ---------------------------------------------------------------------------
 -- HUD snapshot
 -- ---------------------------------------------------------------------------
 
-function State.snapshot(player, now)
+--- Everything the HUD needs, in one table.
+function State.snapshot(player)
 	local record = players[player]
 	if not record then
 		return nil
 	end
+	local t = now()
+	local income = State.computeIncome(player)
 	return {
 		money = record.money,
-		income = State.computeIncome(record),
-		owned = #record.owned,
+		income = income,
+		owned = State.ownedCount(player),
 		slots = Cast.BASE_SLOTS,
 		rebirths = record.rebirths,
 		upgrade = record.upgrade,
 		baseIndex = record.baseIndex,
-		lockLeft = State.lockSecondsLeft(record, now),
-		lockCooldownLeft = State.lockCooldownLeft(record, now),
+		lockLeft = math.max(0, math.ceil(record.lockUntil - t)),
+		lockCooldownLeft = math.max(0, math.ceil(record.lockReadyAt - t)),
 		rebirthCost = Cast.rebirthCost(record.rebirths),
 		upgradeCost = Cast.upgradeCost(record.upgrade),
 	}
+end
+
+--- Every registered player (for the server's broadcast loop).
+function State.allPlayers()
+	local list = {}
+	for player in pairs(players) do
+		table.insert(list, player)
+	end
+	return list
 end
 
 return State
